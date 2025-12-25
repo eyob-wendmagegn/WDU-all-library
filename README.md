@@ -18,4 +18,4 @@
 ## EMAIL_USER=eyobwende18@gmail.com
 ## EMAIL_PASS=snfgpxpmfkmzomta
 ## TELEGRAM_GROUP_URL=https://t.me/+hd5akw7m7IVmM2Q0
-FRONTEND_URL=http://localhost:3000
+## FRONTEND_URL=http://localhost:3000
