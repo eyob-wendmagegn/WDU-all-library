@@ -1,0 +1,34 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "dev:server": "nodemon src/server.js",
+    "seed": "node seed.js",
+    "start": "node src/server.js"
+  },
+  "keywords": [],
+  "author": "Eyob",
+  "license": "ISC",
+  "description": "Library Management System - Backend (Express + MongoDB)",
+  "dependencies": {
+    "@google/genai": "^1.33.0",
+    "axios": "^1.13.2",
+    "bcrypt": "^5.1.1",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "joi": "^17.13.3",
+    "jsonwebtoken": "^9.0.2",
+    "mongodb": "^6.9.0",
+    "mongoose": "^8.19.3",
+    "nodemailer": "^7.0.11",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.7"
+  }
+}
