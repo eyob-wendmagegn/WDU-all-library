@@ -1,8 +1,12 @@
-//frontend/lib/api.js
+// frontend/lib/api.ts
+
 import axios from 'axios'
 
+// Use environment variable, default to localhost:5000/api
+const baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+
 const api = axios.create({
-  baseURL: 'http://localhost:5000/api',  // FULL URL
+  baseURL: baseURL,
 })
 
 export const setAuthToken = (token: string | null) => {
