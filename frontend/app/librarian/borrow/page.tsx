@@ -1,4 +1,4 @@
-// librarian/borrow/page.tsx
+
 'use client';
 
 import React, { useEffect, useState } from 'react'; // Added React import
@@ -23,7 +23,8 @@ import {
   FiAlertCircle,
   FiFilter,
   FiRefreshCw,
-  FiTrash2
+  FiTrash2,
+  FiCheck
 } from 'react-icons/fi';
 
 // Modal Component
@@ -566,6 +567,8 @@ function BorrowDetailCard({ borrow }: { borrow: any }) {
     switch (status) {
       case 'pending':
         return 'bg-yellow-100 text-yellow-800';
+      case 'approved':
+        return 'bg-blue-100 text-blue-800';
       case 'borrowed':
         return 'bg-green-100 text-green-800';
       case 'returned':
@@ -581,6 +584,8 @@ function BorrowDetailCard({ borrow }: { borrow: any }) {
     switch (status) {
       case 'pending':
         return t('pending') || 'Pending';
+      case 'approved':
+        return t('approved') || 'Approved';
       case 'borrowed':
         return t('borrowed') || 'Borrowed';
       case 'returned':
@@ -646,6 +651,16 @@ function BorrowDetailCard({ borrow }: { borrow: any }) {
                 <p className="font-medium text-sm">{formatDate(borrow.dueDate)}</p>
               </div>
             </div>
+            
+            {borrow.borrowedAt && (
+              <div key="borrowed-date-detail" className="flex items-start gap-2">
+                <FiClock className="w-4 h-4 mt-1 text-gray-500" />
+                <div>
+                  <p className="text-xs text-gray-500">{t('borrowed') || 'Borrowed'}</p>
+                  <p className="font-medium text-sm">{formatDate(borrow.borrowedAt)}</p>
+                </div>
+              </div>
+            )}
             
             {borrow.returnedAt && (
               <div key="returned-date-detail" className="flex items-start gap-2">
@@ -834,13 +849,15 @@ export default function LibrarianBorrow() {
   const handleApprovalSuccess = () => {
     closeAllModals();
     fetchBorrows();
-    showToast('Request processed successfully!', 'success');
+    showToast('Request approved! Waiting for Confirmation.', 'success');
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'pending':
         return 'bg-yellow-100 text-yellow-800';
+      case 'approved':
+        return 'bg-blue-100 text-blue-800';
       case 'borrowed':
         return 'bg-green-100 text-green-800';
       case 'returned':
@@ -856,6 +873,8 @@ export default function LibrarianBorrow() {
     switch (status) {
       case 'pending':
         return t('pending') || 'Pending';
+      case 'approved':
+        return t('approved') || 'Approved';
       case 'borrowed':
         return t('borrowed') || 'Borrowed';
       case 'returned':
@@ -942,6 +961,7 @@ export default function LibrarianBorrow() {
               >
                 <option value="">{t('allStatus') || "All Status"}</option>
                 <option value="pending">{t('pending') || "Pending"}</option>
+                <option value="approved">{t('approved') || "Approved"}</option>
                 <option value="borrowed">{t('borrowed') || "Borrowed"}</option>
                 <option value="returned">{t('returned') || "Returned"}</option>
                 <option value="rejected">{t('rejected') || "Rejected"}</option>
@@ -1079,6 +1099,12 @@ export default function LibrarianBorrow() {
                                     <FiCheckCircle className="w-3 h-3" />
                                     {t('review') || 'Review'}
                                   </motion.button>
+                                )}
+                                {b.status === 'approved' && (
+                                    <div className="flex items-center gap-1 text-blue-600 text-xs italic">
+                                        <FiClock className="w-3 h-3" />
+                                        Waiting confirmation
+                                    </div>
                                 )}
                                 <motion.button
                                   key={`delete-button-${b._id}`}

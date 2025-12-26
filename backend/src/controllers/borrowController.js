@@ -1,4 +1,4 @@
-// src/controllers/borrowController.js
+
 import Joi from 'joi';
 import { ObjectId } from 'mongodb';
 import { connectDB } from '../config/db.js';
@@ -90,7 +90,7 @@ export const requestBook = async (req, res) => {
     // Check if user already has a pending or active borrow
     const existingActive = await db.collection('borrows').findOne({
       userId: value.userId,
-      status: { $in: ['pending', 'borrowed'] },
+      status: { $in: ['pending', 'approved', 'borrowed'] },
       returnedAt: null,
     });
     if (existingActive) {
@@ -179,40 +179,33 @@ export const approveRequest = async (req, res) => {
         return res.status(400).json({ message: 'No copies available' });
       }
 
-      // Check if user already has an active borrow
+      // Check if user already has an active borrow or approved request
       const existingBorrow = await db.collection('borrows').findOne({
         userId: borrow.userId,
-        status: 'borrowed',
+        status: { $in: ['approved', 'borrowed'] },
         returnedAt: null,
       });
       if (existingBorrow) {
         return res.status(400).json({ 
-          message: 'User already has a borrowed book' 
+          message: 'User already has a borrowed book or an approved request' 
         });
       }
 
-      // Update borrow record
+      // Update borrow record to 'approved' (Student must confirm to borrow)
       await db.collection('borrows').updateOne(
         { _id: borrow._id },
         {
           $set: {
-            status: 'borrowed',
+            status: 'approved',
             approvedBy: req.user.id,
             approvedAt: new Date(),
-            borrowedAt: new Date(),
           },
         }
       );
 
-      // Reduce book copies
-      await db.collection('books').updateOne(
-        { id: borrow.bookId },
-        { $inc: { copies: -1 } }
-      );
-
       res.json({ 
-        message: 'Request approved and book borrowed successfully', 
-        status: 'borrowed',
+        message: 'Request approved. Student must confirm borrowing to finalize.', 
+        status: 'approved',
         userType: borrow.userType
       });
     } else if (value.action === 'reject') {
@@ -233,6 +226,61 @@ export const approveRequest = async (req, res) => {
         status: 'rejected' 
       });
     }
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+/* --------------------------------------------------------------
+   CONFIRM BORROW – student action to finalize borrowing after approval
+   -------------------------------------------------------------- */
+export const confirmBorrow = async (req, res) => {
+  const { borrowId } = req.body;
+  if (!borrowId) return res.status(400).json({ message: 'Borrow ID is required' });
+
+  try {
+    const db = await connectDB();
+    
+    // Find the approved request for the authenticated user
+    const borrow = await db.collection('borrows').findOne({
+      _id: new ObjectId(borrowId),
+      userId: req.user.id,
+      status: 'approved',
+      returnedAt: null
+    });
+
+    if (!borrow) {
+      return res.status(404).json({ message: 'No approved request found for confirmation' });
+    }
+
+    // Check book availability again
+    const book = await db.collection('books').findOne({ id: borrow.bookId });
+    if (!book || book.copies <= 0) {
+      return res.status(400).json({ message: 'No copies available for confirmation' });
+    }
+
+    // Update to borrowed status and set current date
+    await db.collection('borrows').updateOne(
+      { _id: borrow._id },
+      {
+        $set: {
+          status: 'borrowed',
+          borrowedAt: new Date(),
+        },
+      }
+    );
+
+    // Reduce book copies in inventory
+    await db.collection('books').updateOne(
+      { id: borrow.bookId },
+      { $inc: { copies: -1 } }
+    );
+
+    res.json({
+      message: 'Book confirmed and borrowed successfully',
+      status: 'borrowed'
+    });
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: 'Server error' });
@@ -499,19 +547,19 @@ export const getMyBorrow = async (req, res) => {
     });
     
     if (!borrow) {
-      // Check if user has pending requests
+      // Check if user has pending or approved requests
       const pendingRequest = await db.collection('borrows').findOne({
         userId: userId,
         username: username,
-        status: 'pending',
+        status: { $in: ['pending', 'approved'] },
         returnedAt: null,
       });
       
       if (pendingRequest) {
         return res.status(200).json({ 
-          message: 'Your request is pending approval',
+          message: pendingRequest.status === 'approved' ? 'Your request is approved! Please confirm borrowing.' : 'Your request is pending approval',
           request: pendingRequest,
-          status: 'pending',
+          status: pendingRequest.status,
           userType: req.user.role || 'teacher'
         });
       }
@@ -556,6 +604,7 @@ export const getMyRequests = async (req, res) => {
         userId,
         $or: [
           { status: 'pending' },
+          { status: 'approved' },
           { status: 'rejected' }
         ]
       })

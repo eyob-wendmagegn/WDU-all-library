@@ -1,4 +1,4 @@
-// librarian/borrow/page.tsx
+
 'use client';
 
 import React, { useEffect, useState } from 'react';
@@ -18,6 +18,7 @@ import {
   FiAlertCircle,
   FiCheckCircle,
   FiInfo,
+  FiActivity,
 } from 'react-icons/fi';
 // Using relative paths for the demo. In a real project, these might be aliases like @/components...
 import Layout from '../../../components/Layout';
@@ -475,10 +476,26 @@ export default function TeacherBorrow() {
     showToast('Book request submitted for approval!', 'success');
   };
 
+  /**
+   * Added handler to confirm borrowing an approved book (Teacher role)
+   */
+  const handleConfirmBorrow = async (borrowId: string) => {
+    try {
+      await api.post('/borrows/confirm', { borrowId });
+      showToast('Book borrowed successfully!', 'success');
+      fetchMyRequests();
+      checkMyBorrow();
+      fetchBooks();
+    } catch (err: any) {
+      showToast(err.response?.data?.message || 'Confirmation failed', 'error');
+    }
+  };
+
   const handleReturnSuccess = async () => {
     closeAllModals();
     setMyBorrow(null);
     await checkMyBorrow(); // refresh from server
+    fetchBooks();
     showToast('Book returned successfully!', 'success');
   };
 
@@ -486,6 +503,7 @@ export default function TeacherBorrow() {
     closeAllModals();
     setMyBorrow(null);
     await checkMyBorrow();
+    fetchBooks();
     showToast('Fine paid successfully!', 'success');
   };
 
@@ -529,7 +547,7 @@ export default function TeacherBorrow() {
                         onClick={() => setShowReturnModal(true)}
                         className="flex items-center gap-2 bg-orange-600 text-white px-4 py-2.5 rounded-lg hover:bg-orange-700 transition-colors"
                       >
-                        <FiRotateCcw className="w-5 h-5" />
+                        <FiRotateCcw className="w-4 h-4" />
                         <span className="font-medium">{t('returnBook') || "Return Book"}</span>
                       </button>
                     ) : (
@@ -577,27 +595,21 @@ export default function TeacherBorrow() {
                 <table className="w-full">
                   <thead>
                     <tr>
-                      {/* Book ID column - Blue background */}
                       <th className="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider bg-blue-600">
                         {t('bookId') || "Book ID"}
                       </th>
-                      {/* Title column - Blue background */}
                       <th className="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider bg-blue-600">
                         {t('title') || "Title"}
                       </th>
-                      {/* Name column - Blue background */}
                       <th className="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider bg-blue-600">
                         {t('name') || "Name"}
                       </th>
-                      {/* Copies column - Blue background */}
                       <th className="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider bg-blue-600">
                         {t('copies') || "Copies"}
                       </th>
-                      {/* Status column - Blue background */}
                       <th className="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider bg-blue-600">
                         {t('status') || "Status"}
                       </th>
-                      {/* Action column - Blue background */}
                       <th className="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider bg-blue-600">
                         {t('action') || "Action"}
                       </th>
@@ -615,8 +627,8 @@ export default function TeacherBorrow() {
                       </tr>
                     ) : (
                       currentBooks.map((book) => {
-                        const alreadyRequested = myRequests.some(
-                          (req) => req.bookId === book.id && req.status === 'pending'
+                        const activeRequest = myRequests.find(
+                          (req) => req.bookId === book.id && (req.status === 'pending' || req.status === 'approved')
                         );
                         const isBorrowed = myBorrow?.bookId === book.id;
                         return (
@@ -655,15 +667,21 @@ export default function TeacherBorrow() {
                                 <span className="text-sm text-green-600 font-medium">
                                   {t('currentlyBorrowed') || "Currently Borrowed"}
                                 </span>
-                              ) : alreadyRequested ? (
+                              ) : activeRequest?.status === 'approved' ? (
+                                <button
+                                  onClick={() => handleConfirmBorrow(activeRequest._id)}
+                                  className="bg-green-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-green-700 flex items-center gap-1 shadow-sm"
+                                >
+                                  <FiActivity className="w-3 h-3" />
+                                  {t('confirmBorrow') || "Borrow Book"}
+                                </button>
+                              ) : activeRequest?.status === 'pending' ? (
                                 <span className="text-sm text-yellow-600 font-medium">
                                   {t('requestPending') || "Request Pending"}
                                 </span>
                               ) : book.copies > 0 ? (
                                 <button
                                   onClick={() => {
-                                    // For demo, we allow opening modal even without user. 
-                                    // In production, check getCurrentUser()
                                     setShowRequestModal(true);
                                   }}
                                   className="text-sm text-blue-600 hover:text-blue-800 font-medium hover:underline"
@@ -778,7 +796,7 @@ export default function TeacherBorrow() {
                       <div className="mt-1">
                         <input
                           type="checkbox"
-                          checked={request.status === 'approved'}
+                          checked={request.status === 'approved' || request.status === 'borrowed'}
                           className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
                           readOnly
                         />
@@ -813,7 +831,7 @@ export default function TeacherBorrow() {
                             </p>
                           )}
                         </div>
-                        <div className="mt-3">
+                        <div className="mt-3 flex items-center gap-3">
                           {request.status === 'pending' && (
                             <span className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm font-medium flex items-center gap-1 w-fit">
                               <FiClock className="w-3 h-3" />
@@ -821,9 +839,17 @@ export default function TeacherBorrow() {
                             </span>
                           )}
                           {request.status === 'approved' && (
-                            <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
-                              {t('approved') || "Approved"}
-                            </span>
+                            <>
+                                <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium border border-green-200 uppercase tracking-wide font-bold">
+                                  {t('approved') || "Approved"}
+                                </span>
+                                <button 
+                                  onClick={() => handleConfirmBorrow(request._id)}
+                                  className="bg-green-600 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-md hover:bg-green-700 transition-all flex items-center gap-2"
+                                >
+                                  <FiActivity /> {t('confirmBorrow') || "Confirm & Borrow"}
+                                </button>
+                            </>
                           )}
                           {request.status === 'rejected' && (
                             <div>

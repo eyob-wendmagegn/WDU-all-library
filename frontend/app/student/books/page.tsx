@@ -1,3 +1,4 @@
+
 'use client';
 
 import Layout from '@/components/Layout';
@@ -26,6 +27,7 @@ import {
   FiMoreVertical,
   FiColumns,
   FiEyeOff,
+  FiActivity
 } from 'react-icons/fi';
 
 // TanStack Table
@@ -268,11 +270,6 @@ function SortableHeader({ column, children }: { column: any; children: React.Rea
             e.preventDefault();
             setShowMenu(!showMenu);
           }}
-          onTouchEnd={(e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            setShowMenu(!showMenu);
-          }}
           className="p-1 hover:bg-blue-700 rounded transition-opacity flex-shrink-0"
           title="Column options"
         >
@@ -405,7 +402,6 @@ function RequestForm({ onSuccess, onClose }: { onSuccess: () => void; onClose: (
           onChange={handleChange}
           min={new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 16)}
           className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 appearance-none"
-          style={{ fontSize: form.dueDate ? '16px' : '14px' }} // Prevents zoom on iOS
         />
         {/* Mobile helper text */}
         <div className="sm:hidden mt-1">
@@ -432,7 +428,7 @@ function RequestForm({ onSuccess, onClose }: { onSuccess: () => void; onClose: (
   );
 }
 
-// Return Form Component (used for both normal and pay fine return) - FIXED for mobile
+// Return Form Component
 function ReturnForm({ 
   onSuccess, 
   onClose, 
@@ -475,9 +471,7 @@ function ReturnForm({
       alert(`${t('returnedSuccess') || 'Book returned.'}\n${t('fine')}: ETB ${fine}`);
       onSuccess();
     } catch (err: any) {
-      // In test mode: always success
-      alert(`${t('returnedSuccess') || 'Book returned.'}\n${t('fine')}: ETB ${fineAmount}`);
-      onSuccess();
+      alert(err.response?.data?.message || 'Return failed');
     } finally {
       setLoading(false);
     }
@@ -630,10 +624,26 @@ export default function StudentBooks() {
     showToast('Book request submitted for approval!', 'success');
   };
 
+  /**
+   * Added handler to confirm borrowing an approved book
+   */
+  const handleConfirmBorrow = async (borrowId: string) => {
+    try {
+      await api.post('/borrows/confirm', { borrowId });
+      showToast('Book borrowed successfully!', 'success');
+      fetchMyRequests();
+      checkMyBorrow();
+      fetchBooks();
+    } catch (err: any) {
+      showToast(err.response?.data?.message || 'Confirmation failed', 'error');
+    }
+  };
+
   const handleReturnSuccess = async () => {
     closeAllModals();
     setMyBorrow(null);
     await checkMyBorrow();
+    fetchBooks();
     showToast('Book returned successfully!', 'success');
   };
 
@@ -641,6 +651,7 @@ export default function StudentBooks() {
     closeAllModals();
     setMyBorrow(null);
     await checkMyBorrow();
+    fetchBooks();
     showToast('Fine paid successfully!', 'success');
   };
 
@@ -734,22 +745,34 @@ export default function StudentBooks() {
         ),
         cell: ({ row }) => {
           const book = row.original;
-          const alreadyRequested = myRequests.some(
-            (req) => req.bookId === book.id && req.status === 'pending'
+          const activeRequest = myRequests.find(
+            (req) => req.bookId === book.id && (req.status === 'pending' || req.status === 'approved')
           );
           const isBorrowed = myBorrow?.bookId === book.id;
           
-          return (
-            <div className="text-xs sm:text-sm">
-              {isBorrowed ? (
-                <span className="text-green-600 font-medium">
-                  {t('currentlyBorrowed') || "Currently Borrowed"}
-                </span>
-              ) : alreadyRequested ? (
-                <span className="text-yellow-600 font-medium">
-                  {t('requestPending') || "Request Pending"}
-                </span>
-              ) : book.copies > 0 ? (
+          if (isBorrowed) return <span className="text-green-600 font-medium">{t('currentlyBorrowed') || "Currently Borrowed"}</span>;
+          
+          /**
+           * UPDATED LOGIC: Show 'Confirm Borrow' if librarian has approved
+           */
+          if (activeRequest?.status === 'approved') {
+              return (
+                  <button
+                    onClick={() => handleConfirmBorrow(activeRequest._id)}
+                    className="bg-green-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-green-700 flex items-center gap-1 shadow-sm"
+                  >
+                    <FiActivity className="w-3 h-3" />
+                    {t('confirmBorrow') || "Confirm Borrow"}
+                  </button>
+              );
+          }
+
+          if (activeRequest?.status === 'pending') {
+              return <span className="text-yellow-600 font-medium">{t('requestPending') || "Request Pending"}</span>;
+          }
+
+          if (book.copies > 0) {
+            return (
                 <button
                   onClick={() => {
                     const user = getCurrentUser();
@@ -763,11 +786,10 @@ export default function StudentBooks() {
                 >
                   {t('requestBook') || "Request Book"}
                 </button>
-              ) : (
-                <span className="text-gray-500">{t('notAvailable') || "Not Available"}</span>
-              )}
-            </div>
-          );
+            );
+          }
+
+          return <span className="text-gray-500">{t('notAvailable') || "Not Available"}</span>;
         },
         size: 150,
       },
@@ -861,7 +883,6 @@ export default function StudentBooks() {
             {/* Search and Filter Controls */}
             <div className="mt-4">
               <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                {/* Main Search */}
                 <div className="relative flex-1">
                   <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 sm:w-5 sm:h-5" />
                   <input
@@ -873,56 +894,31 @@ export default function StudentBooks() {
                   />
                 </div>
 
-                {/* Columns Visibility Button */}
                 <div className="relative">
                   <button
                     onClick={() => setShowColumnsMenu(!showColumnsMenu)}
                     className="flex items-center justify-center gap-2 w-full sm:w-auto px-3 sm:px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors"
-                    title={t('showHideColumns') || "Show/Hide columns"}
                   >
                     <FiColumns className="w-4 h-4 sm:w-5 sm:h-5" />
                     <span className="font-medium">{t('columns') || "Columns"}</span>
                   </button>
-                  
-                  {showColumnsMenu && (
-                    <>
-                      {/* Overlay for mobile */}
-                      <div 
-                        className="fixed inset-0 z-40 sm:hidden" 
-                        onClick={() => setShowColumnsMenu(false)}
-                      />
-                      <ColumnsVisibilityMenu 
-                        table={table} 
-                        onClose={() => setShowColumnsMenu(false)} 
-                      />
-                    </>
-                  )}
+                  {showColumnsMenu && <ColumnsVisibilityMenu table={table} onClose={() => setShowColumnsMenu(false)} />}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Books Table - Mobile Responsive */}
+          {/* Books Table */}
           {!loading && (
             <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg overflow-hidden">
-              {/* Mobile Table Container (horizontal scroll) */}
-              <div className="block sm:hidden overflow-x-auto -mx-2">
+              <div className="overflow-x-auto">
                 <table className="w-full min-w-[700px]">
-                  <thead>
+                  <thead className="bg-blue-600">
                     {table.getHeaderGroups().map(headerGroup => (
                       <tr key={headerGroup.id}>
                         {headerGroup.headers.map(header => (
-                          <th 
-                            key={header.id} 
-                            className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider bg-blue-600 text-white whitespace-nowrap"
-                            style={{ width: header.getSize() }}
-                          >
-                            {header.isPlaceholder
-                              ? null
-                              : flexRender(
-                                  header.column.columnDef.header,
-                                  header.getContext()
-                                )}
+                          <th key={header.id} className="px-4 sm:px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white">
+                            {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
                           </th>
                         ))}
                       </tr>
@@ -931,69 +927,9 @@ export default function StudentBooks() {
                   <tbody className="divide-y divide-gray-200">
                     {table.getRowModel().rows?.length ? (
                       table.getRowModel().rows.map(row => (
-                        <tr 
-                          key={row.id} 
-                          className="hover:bg-gray-50 transition-colors"
-                        >
+                        <tr key={row.id} className="hover:bg-gray-50 transition-colors">
                           {row.getVisibleCells().map(cell => (
-                            <td 
-                              key={cell.id} 
-                              className="px-3 py-3 text-sm text-gray-900"
-                            >
-                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                            </td>
-                          ))}
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={columns.length} className="px-4 py-8 text-center text-gray-500">
-                          <div className="flex flex-col items-center justify-center gap-2">
-                            <FiBookOpen className="w-10 h-10 sm:w-12 sm:h-12 text-gray-300" />
-                            <p className="text-gray-500 text-sm sm:text-base">{t('noBooksFound') || "No books found"}</p>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Desktop Table */}
-              <div className="hidden sm:block overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    {table.getHeaderGroups().map(headerGroup => (
-                      <tr key={headerGroup.id}>
-                        {headerGroup.headers.map(header => (
-                          <th 
-                            key={header.id} 
-                            className="px-4 sm:px-6 py-3 text-left text-xs font-medium uppercase tracking-wider bg-blue-600 text-white"
-                            style={{ width: header.getSize() }}
-                          >
-                            {header.isPlaceholder
-                              ? null
-                              : flexRender(
-                                  header.column.columnDef.header,
-                                  header.getContext()
-                                )}
-                          </th>
-                        ))}
-                      </tr>
-                    ))}
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {table.getRowModel().rows?.length ? (
-                      table.getRowModel().rows.map(row => (
-                        <tr 
-                          key={row.id} 
-                          className="hover:bg-gray-50 transition-colors"
-                        >
-                          {row.getVisibleCells().map(cell => (
-                            <td 
-                              key={cell.id} 
-                              className="px-4 sm:px-6 py-3 text-sm text-gray-900"
-                            >
+                            <td key={cell.id} className="px-4 sm:px-6 py-3 text-sm text-gray-900">
                               {flexRender(cell.column.columnDef.cell, cell.getContext())}
                             </td>
                           ))}
@@ -1002,63 +938,14 @@ export default function StudentBooks() {
                     ) : (
                       <tr>
                         <td colSpan={columns.length} className="px-6 py-8 text-center text-gray-500">
-                          <div className="flex flex-col items-center justify-center gap-2">
-                            <FiBookOpen className="w-12 h-12 text-gray-300" />
-                            <p className="text-gray-500">{t('noBooksFound') || "No books found"}</p>
-                          </div>
+                          <FiBookOpen className="w-12 h-12 text-gray-300 mx-auto mb-2" />
+                          {t('noBooksFound') || "No books found"}
                         </td>
                       </tr>
                     )}
                   </tbody>
                 </table>
               </div>
-
-              {/* Pagination - Responsive */}
-              {table.getFilteredRowModel().rows.length > 0 && (
-                <div className="flex flex-col sm:flex-row items-center justify-between px-3 sm:px-6 py-4 border-t gap-4 sm:gap-0">
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs sm:text-sm text-gray-700 whitespace-nowrap">{t('rowsPerPage') || "Rows per page"}</span>
-                      <select
-                        value={table.getState().pagination.pageSize}
-                        onChange={e => table.setPageSize(Number(e.target.value))}
-                        className="border rounded-lg px-2 py-1 text-xs sm:text-sm text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      >
-                        {[5, 10, 20, 30, 40, 50].map(pageSize => (
-                          <option key={pageSize} value={pageSize}>
-                            {pageSize}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <span className="text-xs sm:text-sm text-gray-700 whitespace-nowrap">
-                      {table.getState().pagination.pageIndex * table.getState().pagination.pageSize + 1}-
-                      {Math.min(
-                        (table.getState().pagination.pageIndex + 1) * table.getState().pagination.pageSize,
-                        table.getFilteredRowModel().rows.length
-                      )} {t('of') || "of"} {table.getFilteredRowModel().rows.length}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => table.previousPage()}
-                      disabled={!table.getCanPreviousPage()}
-                      className="flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors text-gray-700 text-xs sm:text-sm whitespace-nowrap"
-                    >
-                      <FiChevronLeft className="w-3 h-3 sm:w-4 sm:h-4" />
-                      <span>{t('prev') || "Previous"}</span>
-                    </button>
-                    <button
-                      onClick={() => table.nextPage()}
-                      disabled={!table.getCanNextPage()}
-                      className="flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors text-gray-700 text-xs sm:text-sm whitespace-nowrap"
-                    >
-                      <span>{t('next') || "Next"}</span>
-                      <FiChevronRight className="w-3 h-3 sm:w-4 sm:h-4" />
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
@@ -1073,56 +960,20 @@ export default function StudentBooks() {
                 <div className="flex items-center gap-2">
                   <FiCheckCircle className="w-4 h-4 sm:w-5 sm:h-5 text-green-600" />
                   <h2 className="text-base sm:text-lg font-bold text-gray-800">{t('activeBorrow') || "Active Borrow"}</h2>
-                  <span className="px-2 sm:px-3 py-0.5 sm:py-1 bg-green-100 text-green-800 rounded-full text-xs sm:text-sm font-medium">
-                    {t('approved') || "Approved"}
-                  </span>
                 </div>
-                <h3 className="text-lg sm:text-xl font-bold text-gray-900 break-words">{myBorrow.bookTitle || myBorrow.bookName}</h3>
+                <h3 className="text-lg sm:text-xl font-bold text-gray-900">{myBorrow.bookTitle || myBorrow.bookName}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs sm:text-sm">
                   <div>
-                    <p className="text-gray-600">
-                      <span className="font-medium">{t('dueDateLabel') || "Due Date"}:</span>{' '}
-                      {new Date(myBorrow.dueDate).toLocaleString('en-US', {
-                        month: '2-digit',
-                        day: '2-digit',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        hour12: true
-                      })}
-                    </p>
-                    <p className="text-gray-600">
-                      <span className="font-medium">{t('borrowed') || "Borrowed"}:</span>{' '}
-                      {new Date(myBorrow.borrowedAt).toLocaleDateString('en-US', {
-                        month: '2-digit',
-                        day: '2-digit',
-                        year: 'numeric'
-                      })}
-                    </p>
+                    <p className="text-gray-600"><span className="font-medium">{t('dueDateLabel') || "Due Date"}:</span> {new Date(myBorrow.dueDate).toLocaleString()}</p>
+                    <p className="text-gray-600"><span className="font-medium">{t('borrowed') || "Borrowed"}:</span> {new Date(myBorrow.borrowedAt).toLocaleDateString()}</p>
                   </div>
                   <div>
                     {myBorrow.fine > 0 ? (
-                      <>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-red-700">{t('fine') || "Fine"}:</span>
-                          <span className="text-xl sm:text-2xl font-bold text-red-600">ETB {myBorrow.fine}</span>
-                        </div>
-                        <p className="text-xs text-red-600 mt-1">
-                          {t('studentGracePeriod') || "Includes 1-day student grace period"}
-                        </p>
-                      </>
+                      <p className="text-xl sm:text-2xl font-bold text-red-600">ETB {myBorrow.fine}</p>
                     ) : (
-                      <p className="text-green-600 font-medium">
-                        {t('studentGracePeriod') || "No fine yet (1-day grace period active)"}
-                      </p>
+                      <p className="text-green-600 font-medium">{t('onTime') || "On Time"}</p>
                     )}
                   </div>
-                </div>
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 max-w-md">
-                  <p className="text-xs sm:text-sm text-blue-800 font-medium">{t('studentBenefit') || "Student Benefit"}</p>
-                  <p className="text-xs text-blue-700">
-                    {t('studentGracePeriod') || "1 day grace period before fines start"}
-                  </p>
                 </div>
               </div>
             </motion.div>
@@ -1131,84 +982,32 @@ export default function StudentBooks() {
           {/* My Requests Section */}
           {myRequests.length > 0 && !loading && (
             <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg p-4 sm:p-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 sm:mb-6 gap-2 sm:gap-0">
-                <h2 className="text-lg sm:text-xl font-bold text-gray-800">{t('myRequests') || "My Requests"}</h2>
-                <span className="px-2 sm:px-3 py-1 bg-gray-100 text-gray-800 rounded-full text-xs sm:text-sm font-medium">
-                  {myRequests.length} {t('results') || "request(s)"}
-                </span>
-              </div>
+              <h2 className="text-lg sm:text-xl font-bold text-gray-800 mb-4">{t('myRequests') || "My Requests"}</h2>
               <div className="space-y-4">
                 {myRequests.map((request) => (
-                  <div
-                    key={request._id}
-                    className="border border-gray-200 rounded-lg sm:rounded-xl p-3 sm:p-4 hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="mt-1">
-                        <input
-                          type="checkbox"
-                          checked={request.status === 'approved'}
-                          className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
-                          readOnly
-                        />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-gray-900 text-base sm:text-lg mb-2 break-words">
-                          {request.bookTitle || request.bookName}
-                        </h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs sm:text-sm">
-                          <p className="text-gray-600">
-                            <span className="font-medium">{t('requested') || "Requested"}:</span>{' '}
-                            {new Date(request.requestedAt).toLocaleString('en-US', {
-                              month: '2-digit',
-                              day: '2-digit',
-                              year: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                              hour12: true
-                            })}
-                          </p>
-                          {request.dueDate && (
-                            <p className="text-gray-600">
-                              <span className="font-medium">{t('dueDateLabel') || "Due"}:</span>{' '}
-                              {new Date(request.dueDate).toLocaleString('en-US', {
-                                month: '2-digit',
-                                day: '2-digit',
-                                year: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                hour12: true
-                              })}
-                            </p>
-                          )}
-                        </div>
-                        <div className="mt-3">
-                          {request.status === 'pending' && (
-                            <span className="px-2 sm:px-3 py-0.5 sm:py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs sm:text-sm font-medium flex items-center gap-1 w-fit">
-                              <FiClock className="w-3 h-3" />
-                              {t('pending') || "Pending Approval"}
-                            </span>
-                          )}
-                          {request.status === 'approved' && (
-                            <span className="px-2 sm:px-3 py-0.5 sm:py-1 bg-green-100 text-green-800 rounded-full text-xs sm:text-sm font-medium">
-                              {t('approved') || "Approved"}
-                            </span>
-                          )}
-                          {request.status === 'rejected' && (
-                            <div>
-                              <span className="px-2 sm:px-3 py-0.5 sm:py-1 bg-red-100 text-red-800 rounded-full text-xs sm:text-sm font-medium mb-2 inline-block">
-                                {t('rejected') || "Rejected"}
-                              </span>
-                              {request.rejectionReason && (
-                                <p className="text-red-600 text-xs sm:text-sm break-words">
-                                  <span className="font-medium">{t('rejectionReason') || "Reason"}:</span>{' '}
-                                  {request.rejectionReason}
-                                </p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                  <div key={request._id} className="border border-gray-200 rounded-lg p-3 sm:p-4 hover:bg-gray-50 transition-colors flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-gray-900 text-base sm:text-lg">{request.bookTitle || request.bookName}</h3>
+                      <p className="text-xs text-gray-500 mt-1">Requested on {new Date(request.requestedAt).toLocaleString()}</p>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      {request.status === 'approved' ? (
+                          <div className="flex flex-col sm:flex-row items-center gap-3">
+                            <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-xs font-bold border border-green-200 uppercase tracking-wide">Approved</span>
+                            <button
+                              onClick={() => handleConfirmBorrow(request._id)}
+                              className="bg-green-600 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-md hover:bg-green-700 transition-all flex items-center gap-2"
+                            >
+                              <FiActivity /> {t('confirmBorrow') || "Confirm Borrow"}
+                            </button>
+                          </div>
+                      ) : (
+                        <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${
+                          request.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'
+                        }`}>
+                          {request.status}
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1221,43 +1020,22 @@ export default function StudentBooks() {
         <AnimatePresence>
           {showRequestModal && (
             <Modal onClose={closeAllModals}>
-              <div className="mb-3">
-                <h2 className="text-lg font-bold text-gray-800 mb-1">{t('requestBook') || "Request Book"}</h2>
-                <p className="text-sm text-gray-600">
-                  {t('requestBookDesc') || "Fill in the details to request a book for librarian approval"}
-                </p>
-              </div>
+              <h2 className="text-lg font-bold text-gray-800 mb-4">{t('requestBook')}</h2>
               <RequestForm onSuccess={handleRequestSuccess} onClose={closeAllModals} />
             </Modal>
           )}
-
-          {/* Normal Return (fine = 0) */}
-          {showReturnModal && myBorrow && myBorrow.fine <= 0 && (
+          {showReturnModal && (
             <Modal onClose={closeAllModals}>
-              <h2 className="text-lg font-bold text-gray-800 mb-2">{t('returnBook') || "Return Book"}</h2>
-              <p className="text-sm text-gray-600 mb-3">
-                {t('returnBookDesc') || "Return your borrowed book. Late returns incur fines."}
-              </p>
+              <h2 className="text-lg font-bold text-gray-800 mb-4">{t('returnBook')}</h2>
               <ReturnForm onSuccess={handleReturnSuccess} onClose={closeAllModals} />
             </Modal>
           )}
-
-          {/* Pay Fine & Return (fine > 0) */}
-          {showPayModal && myBorrow && myBorrow.fine > 0 && (
+          {showPayModal && (
             <Modal onClose={closeAllModals}>
-              <h2 className="text-lg font-bold text-gray-800 mb-2">{t('payFineAndReturn') || "Pay Fine & Return"}</h2>
-              <p className="text-sm text-gray-600 mb-3">
-                {t('payFineDesc') || "Enter your details to pay fine and return book"}
-              </p>
-              <ReturnForm 
-                isPayFine={true} 
-                fineAmount={myBorrow.fine} 
-                onSuccess={handlePaySuccess} 
-                onClose={closeAllModals} 
-              />
+              <h2 className="text-lg font-bold text-gray-800 mb-4">{t('payFineAndReturn')}</h2>
+              <ReturnForm isPayFine={true} fineAmount={myBorrow?.fine} onSuccess={handlePaySuccess} onClose={closeAllModals} />
             </Modal>
           )}
-
           {toast && <Toast toast={toast} />}
         </AnimatePresence>
       </div>

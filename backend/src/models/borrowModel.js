@@ -1,10 +1,9 @@
-// models/borrowModel.js
+
 import { ObjectId } from 'mongodb';
 
 /**
  * Borrow Model
  * Contains all database queries for borrow operations
- * This follows the same structure as your existing code
  */
 export class BorrowModel {
   constructor(db) {
@@ -83,12 +82,12 @@ export class BorrowModel {
   }
 
   /**
-   * Check if user has pending or active borrow
+   * Check if user has pending, approved or active borrow
    */
   async hasActiveBorrow(userId) {
     return await this.collection.findOne({
       userId,
-      status: { $in: ['pending', 'borrowed'] },
+      status: { $in: ['pending', 'approved', 'borrowed'] },
       returnedAt: null,
     });
   }
@@ -147,17 +146,16 @@ export class BorrowModel {
   }
 
   /**
-   * Approve borrow request
+   * Approve borrow request - transitions to 'approved'
    */
   async approveRequest(borrowId, approvedById) {
     const result = await this.collection.updateOne(
       { _id: new ObjectId(borrowId) },
       {
         $set: {
-          status: 'borrowed',
+          status: 'approved',
           approvedBy: approvedById,
           approvedAt: new Date(),
-          borrowedAt: new Date(),
         },
       }
     );
@@ -166,6 +164,34 @@ export class BorrowModel {
       matchedCount: result.matchedCount,
       modifiedCount: result.modifiedCount,
       success: result.matchedCount > 0
+    };
+  }
+
+  /**
+   * Confirm Borrow (Student action)
+   */
+  async confirmBorrow(borrowId, userId) {
+    const borrow = await this.collection.findOne({
+      _id: new ObjectId(borrowId),
+      userId: userId,
+      status: 'approved'
+    });
+
+    if (!borrow) return { success: false, error: 'Approved request not found' };
+
+    const result = await this.collection.updateOne(
+      { _id: borrow._id },
+      {
+        $set: {
+          status: 'borrowed',
+          borrowedAt: new Date(),
+        },
+      }
+    );
+
+    return {
+      success: result.modifiedCount > 0,
+      borrow
     };
   }
 
@@ -311,19 +337,19 @@ export class BorrowModel {
   }
 
   /**
-   * Get user's pending request
+   * Get user's pending or approved request
    */
   async getUserPendingRequest(userId, username) {
     return await this.collection.findOne({
       userId,
       username,
-      status: 'pending',
+      status: { $in: ['pending', 'approved'] },
       returnedAt: null,
     });
   }
 
   /**
-   * Get user's requests (pending and rejected)
+   * Get user's requests (pending, approved and rejected)
    */
   async getUserRequests(userId) {
     return await this.collection
@@ -331,6 +357,7 @@ export class BorrowModel {
         userId,
         $or: [
           { status: 'pending' },
+          { status: 'approved' },
           { status: 'rejected' }
         ]
       })
@@ -361,6 +388,9 @@ export class BorrowModel {
     const pendingRequests = await this.collection.countDocuments({ 
       status: 'pending' 
     });
+    const approvedRequests = await this.collection.countDocuments({ 
+        status: 'approved' 
+    });
     const returnedBooks = await this.collection.countDocuments({ 
       status: 'returned' 
     });
@@ -384,6 +414,7 @@ export class BorrowModel {
       totalBorrows,
       activeBorrows,
       pendingRequests,
+      approvedRequests,
       returnedBooks,
       totalFines: totalFines[0]?.total || 0,
       byUserType,
