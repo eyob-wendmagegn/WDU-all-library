@@ -1,4 +1,3 @@
-// admin/users/page.tsx
 'use client';
 
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
@@ -451,10 +450,22 @@ export default function AdminUsers() {
     const handleImportSubmit = () => {
       if (!parsedData.length) return;
       let finalData: ExcelUserRow[] = [];
+      
+      // Helper to find a value by key case-insensitively and trim key/value
+      const getVal = (row: any, keys: string[]) => {
+        const actualKey = Object.keys(row).find(k => 
+          keys.some(target => k.trim().toLowerCase() === target.toLowerCase())
+        );
+        return actualKey ? row[actualKey] : undefined;
+      };
+
       if (filterType === 'all') {
         finalData = parsedData;
       } else if (filterType === 'id') {
-        finalData = parsedData.filter(row => String(row.ID).trim() === targetId.trim());
+        finalData = parsedData.filter(row => {
+          const rowId = getVal(row, ['ID', 'id', 'User ID', 'ID ']);
+          return String(rowId !== undefined ? rowId : '').trim() === targetId.trim();
+        });
       } else if (filterType === 'range') {
         finalData = parsedData.filter((row, index) => {
           const checkVal = row.NO ? row.NO : index + 1;
@@ -462,21 +473,39 @@ export default function AdminUsers() {
         });
       }
 
-      const mappedData = finalData.map(row => ({
-        id: String(row.ID),
-        name: row['Full Name'],
-        username: row['Username'] || '',
-        email: row['Email'] || '',
-        role: row['Role']?.toLowerCase() || 'student',
-        department: row['Department'] || '',
-        status: 'active'
-      }));
+      const mappedData = finalData.map(row => {
+        const rawId = getVal(row, ['ID', 'id', 'User ID', 'ID ']);
+        const rawName = getVal(row, ['Full Name', 'full name', 'Name', 'FullName']);
+        const rawUser = getVal(row, ['Username', 'username']);
+        const rawMail = getVal(row, ['Email', 'email']);
+        const rawRole = getVal(row, ['Role', 'role']);
+        const rawDept = getVal(row, ['Department', 'department', 'Dept']);
 
-      // Validate: ID and Name are mandatory. Username/Email are optional (can be claimed later).
-      const validData = mappedData.filter(u => u.id && u.name);
+        return {
+          id: rawId !== undefined ? String(rawId).trim() : '',
+          name: rawName !== undefined ? String(rawName).trim() : '',
+          username: rawUser !== undefined ? String(rawUser).trim() : '',
+          email: rawMail !== undefined ? String(rawMail).trim() : '',
+          role: rawRole !== undefined ? String(rawRole).trim().toLowerCase() : 'student',
+          department: rawDept !== undefined ? String(rawDept).trim() : '',
+          status: 'active'
+        };
+      });
+
+      // Validate: ID and Name are mandatory. 
+      // Ensure we don't send strings like "undefined" or empty IDs.
+      const validData = mappedData.filter(u => u.id && u.name && u.id.toLowerCase() !== 'undefined');
       
       if (validData.length < mappedData.length) {
-         showToast(`Warning: ${mappedData.length - validData.length} rows skipped due to missing ID/Name`, 'error');
+         const skippedCount = mappedData.length - validData.length;
+         if (skippedCount > 0) {
+           showToast(`Warning: ${skippedCount} rows skipped due to missing/invalid ID or Name headers`, 'error');
+         }
+      }
+
+      if (validData.length === 0) {
+        showToast('No valid users found to import. Check if Excel headers match "ID" and "Full Name".', 'error');
+        return;
       }
 
       handleImportUsers(validData);

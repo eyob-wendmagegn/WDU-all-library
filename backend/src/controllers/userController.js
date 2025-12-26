@@ -1,4 +1,3 @@
-//userController.js
 import { connectDB } from '../config/db.js';
 import { hashPassword } from '../utils/hash.js';
 import Joi from 'joi';
@@ -30,13 +29,13 @@ export const createUser = async (req, res) => {
     if (idExists) return res.status(400).json({ message: 'ID already in use' });
 
     // Only check Username/Email uniqueness if they are provided
-    if (value.username) {
-      const usernameExists = await db.collection('users').findOne({ username: value.username });
+    if (value.username && value.username.trim() !== "") {
+      const usernameExists = await db.collection('users').findOne({ username: value.username.trim() });
       if (usernameExists) return res.status(400).json({ message: 'Username already taken' });
     }
 
-    if (value.email) {
-      const emailExists = await db.collection('users').findOne({ email: value.email });
+    if (value.email && value.email.trim() !== "") {
+      const emailExists = await db.collection('users').findOne({ email: value.email.trim() });
       if (emailExists) return res.status(400).json({ message: 'Email already registered' });
     }
 
@@ -45,15 +44,28 @@ export const createUser = async (req, res) => {
 
     const doc = {
       ...value,
-      // Ensure fields exist even if empty, to simplify updates later
-      username: value.username || '',
-      email: value.email || '',
       password: hashed,
       passwordChanged: false,
       createdAt: new Date(),
       // Add updatedAt field for tracking changes (FIX for report)
       updatedAt: new Date(),
     };
+
+    // CRITICAL FIX: To prevent E11000 duplicate key error on unique indexes,
+    // we must not include these fields at all if they are empty strings.
+    // MongoDB's unique index considers '' as a specific value, so multiple '' will clash.
+    // Sparse indexes ignore fields that are missing.
+    if (!doc.username || doc.username.trim() === "") {
+      delete doc.username;
+    } else {
+      doc.username = doc.username.trim();
+    }
+
+    if (!doc.email || doc.email.trim() === "") {
+      delete doc.email;
+    } else {
+      doc.email = doc.email.trim();
+    }
 
     await db.collection('users').insertOne(doc);
 
@@ -92,35 +104,54 @@ export const importUsers = async (req, res) => {
 
     for (const userData of usersToImport) {
       try {
+        const userId = String(userData.id).trim();
+        const username = userData.username ? userData.username.trim() : "";
+        const email = userData.email ? userData.email.trim() : "";
+
         // Build OR query based on what is provided
-        const checks = [{ id: userData.id }];
-        if (userData.username) checks.push({ username: userData.username });
-        if (userData.email) checks.push({ email: userData.email });
+        // IMPORTANT: We only include checks for username/email if they are non-empty strings
+        // to avoid matching multiple "unassigned" accounts against each other during the check.
+        const checks = [{ id: userId }];
+        if (username !== "") {
+          checks.push({ username: username });
+        }
+        if (email !== "") {
+          checks.push({ email: email });
+        }
 
         // Check for existing ID, Username, or Email
         const existing = await db.collection('users').findOne({ $or: checks });
 
         if (existing) {
-          errors.push({ id: userData.id, message: `ID, Username, or Email already exists for user ${userData.id}.` });
+          errors.push({ id: userId, message: `Conflict: User with ID, Username, or Email '${userId}' already exists.` });
           continue; // Skip this user
         }
 
         const doc = {
           ...userData,
-          username: userData.username || '',
-          email: userData.email || '',
+          id: userId,
+          name: userData.name.trim(),
+          username: username || '',
+          email: email || '',
           password: hashed,
           passwordChanged: false,
           createdAt: new Date(),
-          // Add updatedAt field for tracking changes (FIX for report)
           updatedAt: new Date(),
         };
+
+        // CRITICAL FIX: To prevent E11000 duplicate key error on { username: null } or { username: "" },
+        // we must not include these fields at all if they are empty, PROVIDED the index is sparse.
+        // If the index is NOT sparse, the database will still complain about multiple nulls.
+        // For standard unique indexes, we force them to '' but that only allows ONE unassigned user.
+        // The most robust way is to ensure the database index is sparse and omit empty fields.
+        if (!doc.username || doc.username === "") delete doc.username;
+        if (!doc.email || doc.email === "") delete doc.email;
 
         await db.collection('users').insertOne(doc);
         importedCount++;
       } catch (err) {
         console.error(`Error importing user ${userData.id}:`, err);
-        errors.push({ id: userData.id, message: 'Database error' });
+        errors.push({ id: userData.id, message: err.message || 'Database error during insertion' });
       }
     }
 
@@ -269,8 +300,7 @@ export const updateUser = async (req, res) => {
       { returnDocument: 'after', projection: { password: 0, _id: 0 } }
     );
 
-    // FIX: Newer MongoDB drivers return the document directly in result, 
-    // while older ones returned { value: doc }. We handle both cases.
+    // handle both older and newer MongoDB drivers
     const updatedUser = result.value || result;
 
     if (!updatedUser) return res.status(404).json({ message: 'User not found' });
