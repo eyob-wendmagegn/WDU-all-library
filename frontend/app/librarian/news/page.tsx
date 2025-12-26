@@ -1,14 +1,20 @@
-// app/librarian/news/page.tsx
 'use client';
 
+import { useState, useEffect } from 'react';  // ← ADD THIS
 import Layout from '@/components/Layout';
 import NewsList from '@/components/NewsList';
-import { useTranslation } from '@/lib/i18n'; // ← ADDED
+import { useTranslation } from '@/lib/i18n';
 
 export default function LibrarianNewsPage() {
-  const { t } = useTranslation(); // ← ADDED
+  const { t } = useTranslation();
   const role = 'librarian';
-  const userId = localStorage.getItem('userId') || 'unknown';
+
+  const [userId, setUserId] = useState('unknown');  // ← Start with fallback
+
+  useEffect(() => {
+    const id = localStorage.getItem('userId') || 'unknown';
+    setUserId(id);
+  }, []);  // ← Runs only on client after mount
 
   return (
     <Layout role={role}>
